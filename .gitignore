@@ -1,0 +1,26 @@
+# ESP-IDF build output
+firmware/build/
+firmware/sdkconfig.old
+firmware/dependencies.lock
+firmware/managed_components/
+
+# ESP-IDF auto-generated — run `idf.py menuconfig` to regenerate
+# sdkconfig is excluded so each developer configures locally.
+# To share a base config, use sdkconfig.defaults instead.
+firmware/sdkconfig
+
+# Claude Code session/memory data
+.claude/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# macOS
+.DS_Store
+
+# Session management files (Claude Code workflow, not useful to collaborators)
+session_start.md
+session_end.md
