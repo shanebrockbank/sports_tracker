@@ -21,6 +21,15 @@ __pycache__/
 # macOS
 .DS_Store
 
-# Session management files (Claude Code workflow, not useful to collaborators)
+# Local development/session docs — not part of the public repo
 session_start.md
 session_end.md
+bom.md
+claude.md
+decisions.md
+fit_format_notes.md
+hardware_config.md
+known_issues.md
+power_budget.md
+state_machine.md
+testing_log.md
