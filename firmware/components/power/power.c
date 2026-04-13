@@ -11,6 +11,11 @@
 
 static const char *TAG = "power";
 
+#define I2C_CLK_SPEED_HZ       400000
+#define POWER_POLL_IDLE_MS      10000
+#define POWER_POLL_ACTIVE_MS     1000
+#define CHARGING_THRESHOLD_MA  -10.0f
+
 /* ── Module state ─────────────────────────────────────────────────────── */
 
 static int s_pin_pwr_gate;
@@ -161,7 +166,7 @@ esp_err_t power_init(const power_cfg_t *cfg)
         .scl_io_num       = cfg->pin_scl,
         .sda_pullup_en    = GPIO_PULLUP_ENABLE,
         .scl_pullup_en    = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 400000,     /* 400 kHz fast mode */
+        .master.clk_speed = I2C_CLK_SPEED_HZ,
     };
     err = i2c_param_config(cfg->i2c_port, &i2c);
     if (err != ESP_OK) return err;
@@ -188,6 +193,7 @@ esp_err_t power_init(const power_cfg_t *cfg)
 void power_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "task started");
+    ESP_LOGI(TAG, "stack hwm: %d words", uxTaskGetStackHighWaterMark(NULL));
 
     bool low_battery_warned = false;
 
@@ -196,8 +202,13 @@ void power_task(void *pvParameters)
          * Poll rate: 1 Hz during activity, 0.1 Hz (10s) in idle.
          * Phase 1: fixed at 1 Hz until system state is wired up.
          */
-        uint32_t poll_ms = (system_get_state() == SYS_STATE_IDLE) ? 10000 : 1000;
+        uint32_t poll_ms = (system_get_state() == SYS_STATE_IDLE) ? POWER_POLL_IDLE_MS : POWER_POLL_ACTIVE_MS;
         vTaskDelay(pdMS_TO_TICKS(poll_ms));
+
+        if (system_get_state() == SYS_STATE_DEEP_SLEEP) {
+            xEventGroupSetBits(g_sys_events, SYS_EVT_SLEEP_READY_POWER);
+            vTaskDelete(NULL);
+        }
 
         /* Read INA226 — non-fatal on error, keep last values */
         float v = 0.0f, i_ma = 0.0f, p_mw = 0.0f;
@@ -217,14 +228,14 @@ void power_task(void *pvParameters)
         ESP_LOGD(TAG, "%.3fV  %.1fmA  %.1fmW  %d%%", v, i_ma, p_mw, pct);
 
         /* Update shared state */
-        if (xSemaphoreTake(g_state_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-            g_state.power.bus_voltage_v = v;
-            g_state.power.current_ma    = i_ma;
-            g_state.power.power_mw      = p_mw;
-            g_state.power.battery_pct   = pct;
-            g_state.power.charging      = (i_ma < -10.0f); /* negative = charging */
-            xSemaphoreGive(g_state_mutex);
-        }
+        power_data_t pwr = {
+            .bus_voltage_v = v,
+            .current_ma    = i_ma,
+            .power_mw      = p_mw,
+            .battery_pct   = pct,
+            .charging      = (i_ma < CHARGING_THRESHOLD_MA),
+        };
+        state_set_power(&pwr);
 
         /* Low battery warning */
         if (pct <= BATT_WARN_PCT && !low_battery_warned) {
@@ -235,10 +246,9 @@ void power_task(void *pvParameters)
 
         /* Critical: auto-save and sleep */
         if (pct <= BATT_CRITICAL_PCT) {
-            ESP_LOGE(TAG, "critical battery %d%% — entering deep sleep", pct);
-            system_set_state(SYS_STATE_DEEP_SLEEP);
-            /* system_set_state(DEEP_SLEEP) calls esp_deep_sleep_start() */
-            /* We never reach here, but vTaskDelete is tidy */
+            ESP_LOGE(TAG, "critical battery %d%% — requesting deep sleep", pct);
+            xEventGroupSetBits(g_sys_events, SYS_EVT_REQ_DEEP_SLEEP);
+            xEventGroupSetBits(g_sys_events, SYS_EVT_SLEEP_READY_POWER);
             vTaskDelete(NULL);
         }
 

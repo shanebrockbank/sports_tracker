@@ -152,6 +152,7 @@ void input_task(void *pvParameters)
     int64_t pwr_press     = 0;   /* time of last PWR falling edge */
 
     ESP_LOGI(TAG, "task started");
+    ESP_LOGI(TAG, "stack hwm: %d words", uxTaskGetStackHighWaterMark(NULL));
 
     for (;;) {
         if (xQueueReceive(s_raw_queue, &raw, portMAX_DELAY) != pdTRUE) {
@@ -214,10 +215,12 @@ void input_task(void *pvParameters)
                 if (held_ms < BTN_DEBOUNCE_MS) break;
 
                 if (held_ms >= PWR_LONG_PRESS_MS) {
-                    /* Long press → request deep sleep via state machine */
+                    /* Long press → request deep sleep via event group */
                     input_event_t evt = { .type = INPUT_EVT_PWR_LONG };
                     xQueueSend(g_input_queue, &evt, 0);
-                    system_set_state(SYS_STATE_DEEP_SLEEP);
+                    xEventGroupSetBits(g_sys_events, SYS_EVT_REQ_DEEP_SLEEP);
+                    xEventGroupSetBits(g_sys_events, SYS_EVT_SLEEP_READY_INPUT);
+                    vTaskDelete(NULL);
                 } else {
                     input_event_t evt = { .type = INPUT_EVT_PWR_PRESS };
                     xQueueSend(g_input_queue, &evt, 0);
