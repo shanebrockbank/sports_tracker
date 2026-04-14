@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "driver/i2c.h"
 
 static const char *TAG = "main";
 
@@ -41,6 +42,7 @@ static void display_task(void *pvParameters)
     system_state_e last_state = (system_state_e)-1;
 
     ESP_LOGI("display_task", "started");
+    ESP_LOGI("display_task", "stack hwm: %d words", uxTaskGetStackHighWaterMark(NULL));
 
     for (;;) {
         /* Wait for a state change, then redraw */
@@ -50,28 +52,27 @@ static void display_task(void *pvParameters)
                             pdMS_TO_TICKS(200));
 
         system_state_e state = system_get_state();
+        if (state == SYS_STATE_DEEP_SLEEP) {
+            xEventGroupSetBits(g_sys_events, SYS_EVT_SLEEP_READY_DISPLAY);
+            vTaskDelete(NULL);
+        }
         if (state == last_state) continue;
         last_state = state;
 
         display_clear(COLOR_BLACK);
 
-        /* Title bar */
+        /* Title bar — top */
         display_fill_rect(0, 0, DISPLAY_WIDTH, 20, COLOR_DKGRAY);
         display_draw_string(4, 6, "Sports Tracker", COLOR_WHITE, COLOR_DKGRAY, 1);
 
-        /* State label */
-        const char *label = (state < 10) ? state_names[state] : "UNKNOWN";
+        /* State label — middle */
+        const char *label = (state < (int)(sizeof(state_names) / sizeof(state_names[0])))
+                                ? state_names[state] : "UNKNOWN";
         display_draw_string(60, 100, "State:", COLOR_GRAY, COLOR_BLACK, 2);
         display_draw_string(60, 120, label,   COLOR_GREEN, COLOR_BLACK, 2);
 
-        /* Battery info — snapshot under mutex */
-        power_data_t pwr = {0};
-        if (xSemaphoreTake(g_state_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-            pwr = g_state.power;
-            xSemaphoreGive(g_state_mutex);
-        }
-
-        /* Simple battery percentage bar at the bottom */
+        /* Battery info — bottom */
+        power_data_t pwr = state_get_power();
         char batt_str[16];
         snprintf(batt_str, sizeof(batt_str), "Batt: %d%%", pwr.battery_pct);
         display_draw_string(4, DISPLAY_HEIGHT - 20, batt_str,
@@ -165,7 +166,21 @@ void app_main(void)
     ESP_LOGI(TAG, "all tasks started");
 
     /*
-     * app_main returns here — the FreeRTOS scheduler continues running
-     * the tasks above.  The idle task handles WFI-based light sleep.
+     * app_main acts as the Phase 1 state manager.
+     * Tasks post SYS_EVT_REQ_DEEP_SLEEP; app_main is the only caller of
+     * system_set_state(SYS_STATE_DEEP_SLEEP).
      */
+    for (;;) {
+        EventBits_t bits = xEventGroupWaitBits(
+            g_sys_events,
+            SYS_EVT_REQ_DEEP_SLEEP,
+            pdTRUE,          /* clear on exit */
+            pdFALSE,
+            portMAX_DELAY);
+
+        if (bits & SYS_EVT_REQ_DEEP_SLEEP) {
+            system_set_state(SYS_STATE_DEEP_SLEEP);
+            /* system_set_state → system_enter_deep_sleep → does not return */
+        }
+    }
 }

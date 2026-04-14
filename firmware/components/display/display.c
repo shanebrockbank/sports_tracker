@@ -20,10 +20,14 @@ esp_err_t display_init(const display_cfg_t *cfg)
 
 /* ── Primitives ───────────────────────────────────────────────────────── */
 
+void display_set_backlight(uint8_t pct)
+{
+    ili9341_set_backlight(pct);
+}
+
 void display_clear(uint16_t color)
 {
-    ili9341_set_window(0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
-    ili9341_fill_color(color, (uint32_t)DISPLAY_WIDTH * DISPLAY_HEIGHT);
+    ili9341_clear_gram(color);
 }
 
 void display_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)

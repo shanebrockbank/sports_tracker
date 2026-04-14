@@ -195,7 +195,7 @@ esp_err_t ili9341_init(const display_cfg_t *cfg)
         .quadhd_io_num   = -1,
         .max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * 2,
     };
-    err = spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO);
+    err = spi_bus_initialize(SPI3_HOST, &bus, SPI_DMA_CH_AUTO);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "spi_bus_initialize failed: %s", esp_err_to_name(err));
         return err;
@@ -209,7 +209,7 @@ esp_err_t ili9341_init(const display_cfg_t *cfg)
         .queue_size     = 7,
         .pre_cb         = ili9341_pre_transfer_cb,
     };
-    err = spi_bus_add_device(SPI2_HOST, &dev, &s_spi);
+    err = spi_bus_add_device(SPI3_HOST, &dev, &s_spi);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "spi_bus_add_device failed: %s", esp_err_to_name(err));
         return err;
@@ -226,6 +226,10 @@ esp_err_t ili9341_init(const display_cfg_t *cfg)
     /* Hardware reset then init sequence */
     ili9341_reset(cfg->pin_rst);
     ili9341_send_init_sequence();
+
+    /* Full GRAM clear in landscape coordinates (CASET 0–319, PASET 0–239). */
+    ili9341_set_window(0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
+    ili9341_fill_color(0x0000, (uint32_t)DISPLAY_WIDTH * DISPLAY_HEIGHT);
 
     /* Backlight */
     if (cfg->pin_bl >= 0) {
@@ -245,19 +249,23 @@ void ili9341_set_window(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2)
 {
     uint8_t d[4];
 
-    /* Column address set */
+    /*
+     * This module is landscape-native: CASET = physical X (0–319),
+     * PASET = physical Y (0–239).  No axis swap needed.
+     */
+
+    /* CASET ← x */
     ili9341_write_cmd(ILI9341_CASET);
     d[0] = x1 >> 8; d[1] = x1 & 0xFF;
     d[2] = x2 >> 8; d[3] = x2 & 0xFF;
     ili9341_write_data(d, 4);
 
-    /* Row (page) address set */
+    /* PASET ← y */
     ili9341_write_cmd(ILI9341_PASET);
     d[0] = y1 >> 8; d[1] = y1 & 0xFF;
     d[2] = y2 >> 8; d[3] = y2 & 0xFF;
     ili9341_write_data(d, 4);
 
-    /* Enter write mode */
     ili9341_write_cmd(ILI9341_RAMWR);
 }
 
@@ -298,7 +306,13 @@ void ili9341_fill_color(uint16_t color, uint32_t count)
     }
 }
 
-void display_set_backlight(uint8_t pct)
+void ili9341_clear_gram(uint16_t color)
+{
+    ili9341_set_window(0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
+    ili9341_fill_color(color, (uint32_t)DISPLAY_WIDTH * DISPLAY_HEIGHT);
+}
+
+void ili9341_set_backlight(uint8_t pct)
 {
     if (s_pin_bl < 0) return;
     if (pct > 100) pct = 100;
@@ -306,3 +320,4 @@ void display_set_backlight(uint8_t pct)
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 }
+

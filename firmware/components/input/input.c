@@ -90,6 +90,19 @@ static esp_err_t gpio_init_input_pullup(int pin)
     return gpio_config(&io);
 }
 
+/* GPIO 34–39 on ESP32 are input-only — no internal pull-up/down */
+static esp_err_t gpio_init_input_only(int pin)
+{
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << pin),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    return gpio_config(&io);
+}
+
 /* ── Public: init ─────────────────────────────────────────────────────── */
 
 esp_err_t input_init(const input_cfg_t *cfg)
@@ -101,13 +114,14 @@ esp_err_t input_init(const input_cfg_t *cfg)
     s_pin_enc_sw = cfg->pin_enc_sw;
     s_pin_pwr    = cfg->pin_pwr_btn;
 
-    /* Configure all input pins with pull-ups */
+    /* Configure input pins — enc_sw (GPIO35) is input-only, needs external pull-up */
     err  = gpio_init_input_pullup(cfg->pin_enc_a);
     err |= gpio_init_input_pullup(cfg->pin_enc_b);
-    err |= gpio_init_input_pullup(cfg->pin_enc_sw);
+    err |= gpio_init_input_only(cfg->pin_enc_sw);   /* GPIO35: input-only, no internal PU */
     err |= gpio_init_input_pullup(cfg->pin_pwr_btn);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "gpio_config failed");
+        ESP_LOGE(TAG, "gpio_config failed (pins: enc_a=%d enc_b=%d enc_sw=%d pwr=%d)",
+                 cfg->pin_enc_a, cfg->pin_enc_b, cfg->pin_enc_sw, cfg->pin_pwr_btn);
         return err;
     }
 

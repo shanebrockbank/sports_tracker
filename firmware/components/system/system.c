@@ -7,7 +7,7 @@ static const char *TAG = "system";
 
 /* ── Shared state ─────────────────────────────────────────────────────── */
 
-system_state_t     g_state;
+static system_state_t g_state;
 SemaphoreHandle_t  g_state_mutex;
 EventGroupHandle_t g_sys_events;
 
@@ -49,6 +49,28 @@ system_state_e system_get_state(void)
     return s_state;
 }
 
+power_data_t state_get_power(void)
+{
+    power_data_t snap = {0};
+    if (xSemaphoreTake(g_state_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        snap = g_state.power;
+        xSemaphoreGive(g_state_mutex);
+    } else {
+        ESP_LOGW(TAG, "state_get_power: mutex timeout");
+    }
+    return snap;
+}
+
+void state_set_power(const power_data_t *data)
+{
+    if (xSemaphoreTake(g_state_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        g_state.power = *data;
+        xSemaphoreGive(g_state_mutex);
+    } else {
+        ESP_LOGW(TAG, "state_set_power: mutex timeout — update dropped");
+    }
+}
+
 void system_enter_deep_sleep(void)
 {
     ESP_LOGI(TAG, "entering deep sleep");
@@ -59,11 +81,13 @@ void system_enter_deep_sleep(void)
      */
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
 
-    /*
-     * Give tasks a moment to clean up.  In later phases this will be
-     * replaced with an explicit shutdown handshake via the event group.
-     */
-    vTaskDelay(pdMS_TO_TICKS(50));
+    /* Wait for all tasks to signal sleep-ready. 500ms safety timeout
+     * in case a task is stuck; prefer all three bits being set promptly. */
+    xEventGroupWaitBits(g_sys_events,
+                        SYS_EVT_ALL_SLEEP_READY,
+                        pdFALSE,            /* don't clear */
+                        pdTRUE,             /* wait for ALL bits */
+                        pdMS_TO_TICKS(500));
 
     esp_deep_sleep_start();
     /* Does not return. */

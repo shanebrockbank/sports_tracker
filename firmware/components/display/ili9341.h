@@ -44,12 +44,14 @@
 #define MADCTL_BGR  0x08  /* BGR colour order (vs RGB) */
 #define MADCTL_MH   0x04  /* Horizontal refresh order */
 
-/*
- * Landscape orientation: 320 wide × 240 tall, origin top-left.
- * MV=1 swaps row/col; MX=1 mirrors X so scan goes left→right.
- * BGR=1 because the ILI9341 on common 2.8" modules uses BGR order.
- */
-#define ILI9341_MADCTL_LANDSCAPE  (MADCTL_MX | MADCTL_MV | MADCTL_BGR)
+/*                                                                                          
+   * Landscape: 320 wide × 240 tall, Y=0 at physical top, X=0 at physical left.
+   * This module is landscape-native: CASET addresses physical X (0–319),                     
+   * PASET addresses physical Y (0–239).  No MV needed; no x↔y swap in                        
+   * ili9341_set_window.  MX=1 corrects horizontal scan direction.
+   * BGR=1 for this module's panel colour order.                                              
+   */                                                 
+#define ILI9341_MADCTL_LANDSCAPE  (MADCTL_MX | MADCTL_BGR)
 
 /* ── DMA pixel buffer ─────────────────────────────────────────────────── */
 
@@ -62,3 +64,5 @@ esp_err_t ili9341_init(const display_cfg_t *cfg);
 void      ili9341_set_window(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2);
 void      ili9341_write_pixels(const uint16_t *data, uint32_t count);
 void      ili9341_fill_color(uint16_t color, uint32_t count);
+void      ili9341_clear_gram(uint16_t color);      /* landscape addressing, covers all 76800 GRAM cells */
+void      ili9341_set_backlight(uint8_t pct);      /* 0–100 percent; no-op if pin_bl < 0 */
